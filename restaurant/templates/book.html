@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block content %}
+<section><article><h1>Make a reservation</h1><div class="row">
+<div class="column"><form id="form" method="post">{% csrf_token %}
+<p><label for="first_name">First name:</label><input id="first_name" name="first_name" maxlength="200" required></p>
+<p><label for="reservation_date">Reservation date:</label><input id="reservation_date" name="reservation_date" type="date" required></p>
+<p><label for="reservation_slot">Reservation time:</label><select id="reservation_slot" name="reservation_slot" required></select></p>
+<button type="submit" id="button">Reserve</button><p id="feedback" role="status" aria-live="polite"></p></form></div>
+<div class="column"><h2>Bookings For <span id="today"></span></h2><div id="bookings"></div></div>
+</div></article></section>
+<script>
+const dateInput = document.getElementById('reservation_date');
+const localNow = new Date();
+const localToday = new Date(localNow.getTime() - localNow.getTimezoneOffset()*60000).toISOString().slice(0,10);
+dateInput.value = localToday;
+const slotSelect = document.getElementById('reservation_slot');
+const feedback = document.getElementById('feedback');
+const csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
+function formatTime(time) { const h = time % 12 || 12; return `${h} ${time < 12 ? 'AM' : 'PM'}`; }
+async function getBookings() {
+  const chosen = dateInput.value;
+  document.getElementById('today').textContent = chosen;
+  const response = await fetch(`{% url 'bookings' %}?date=${encodeURIComponent(chosen)}`);
+  if (!response.ok) { feedback.textContent = 'Could not load reservations'; return; }
+  const data = await response.json();
+  if (dateInput.value !== chosen) return;
+  const reserved = new Set(data.map(b => Number(b.reservation_slot)));
+  slotSelect.replaceChildren();
+  const placeholder = new Option('Select time', '', true, true);
+  placeholder.disabled = true; slotSelect.add(placeholder);
+  for (let hour = 10; hour <= 20; hour++) {
+    const option = new Option(`${formatTime(hour)}${reserved.has(hour) ? ' (Booked)' : ''}`, String(hour));
+    option.disabled = reserved.has(hour); slotSelect.add(option);
+  }
+  const list = document.getElementById('bookings'); list.replaceChildren();
+  if (!data.length) { list.textContent = 'No Booking'; return; }
+  for (const booking of data) {
+    const p = document.createElement('p');
+    p.textContent = `${booking.first_name} — ${formatTime(Number(booking.reservation_slot))}`;
+    list.appendChild(p);
+  }
+}
+dateInput.addEventListener('change', () => { feedback.textContent = ''; getBookings(); });
+document.getElementById('form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!event.target.reportValidity()) return;
+  const payload = { first_name: document.getElementById('first_name').value.trim(), reservation_date: dateInput.value, reservation_slot: Number(slotSelect.value) };
+  if (!payload.first_name || !payload.reservation_slot) return;
+  const response = await fetch('{% url 'bookings' %}', {method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':csrf}, body:JSON.stringify(payload)});
+  const data = await response.json();
+  feedback.textContent = response.ok ? 'Reservation confirmed!' : (data.error || 'Unable to book this slot');
+  await getBookings();
+});
+getBookings();
+</script>
+{% endblock %}
